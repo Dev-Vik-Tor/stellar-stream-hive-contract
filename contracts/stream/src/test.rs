@@ -19,11 +19,22 @@ use soroban_sdk::{
 /// realistically enough for the stream contract's own math and control
 /// flow to be tested end-to-end.
 mod mock_vault {
-    use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env};
+    use soroban_sdk::{contract, contractevent, contractimpl, contracttype, token, Address, Env};
 
     #[contracttype]
     enum Key {
         Balance(u64),
+    }
+
+    /// Mirrors the real vault's `Refund` event (same topics and data layout)
+    /// so tests can assert the order of events emitted during `cancel_stream`.
+    #[contractevent(data_format = "vec")]
+    pub struct Refund {
+        #[topic]
+        pub stream_id: u64,
+        pub to: Address,
+        pub token: Address,
+        pub amount: i128,
     }
 
     #[contract]
@@ -70,7 +81,23 @@ mod mock_vault {
             amount: i128,
             stream_id: u64,
         ) {
-            Self::release(env, caller, to, token, amount, stream_id);
+            // Same order as the real vault: token transfer first, then the
+            // vault's own `Refund` event.
+            Self::release(
+                env.clone(),
+                caller,
+                to.clone(),
+                token.clone(),
+                amount,
+                stream_id,
+            );
+            Refund {
+                stream_id,
+                to,
+                token,
+                amount,
+            }
+            .publish(&env);
         }
 
         pub fn balance_of_stream(env: Env, stream_id: u64) -> i128 {
@@ -1506,3 +1533,51 @@ fn test_create_stream_with_non_token_address_leaves_no_state() {
     assert_eq!(create_default_stream(&ctx, true), 1);
 }
 
+#[test]
+fn test_cancel_event_order_is_transfer_then_vault_refund_then_cancel() {
+    use crate::events;
+    use soroban_sdk::{testutils::Events as _, Event as _};
+
+    let ctx = setup();
+    let id = create_default_stream(&ctx, true);
+    let midpoint = START + (END - START) / 2;
+    set_ledger(&ctx, midpoint);
+
+    ctx.stream.cancel_stream(&ctx.sender, &id);
+
+    let streamed_now = AMOUNT / 2;
+    let remainder = AMOUNT - streamed_now;
+
+    // Emission order during `cancel_stream`:
+    //   1. the token contract's `transfer` event (vault -> sender refund),
+    //   2. the vault's `Refund` event,
+    //   3. the stream contract's `Cancel` event, published last, exactly once.
+    let emitted = ctx.env.events().all();
+    let events = emitted.events();
+    assert_eq!(events.len(), 3, "unexpected events: {events:?}");
+
+    assert_eq!(
+        emitted.filter_by_contract(&ctx.token_address).events(),
+        &events[..1]
+    );
+    assert_eq!(
+        events[1],
+        mock_vault::Refund {
+            stream_id: id,
+            to: ctx.sender.clone(),
+            token: ctx.token_address.clone(),
+            amount: remainder,
+        }
+        .to_xdr(&ctx.env, &ctx.vault.address)
+    );
+    assert_eq!(
+        events[2],
+        events::Cancel {
+            stream_id: id,
+            sender: ctx.sender.clone(),
+            streamed_now,
+            remainder,
+        }
+        .to_xdr(&ctx.env, &ctx.stream.address)
+    );
+}
