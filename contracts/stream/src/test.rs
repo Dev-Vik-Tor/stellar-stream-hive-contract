@@ -777,6 +777,72 @@ fn test_page_size_is_capped() {
     assert_eq!(page.len(), crate::MAX_PAGE_SIZE);
 }
 
+#[test]
+fn test_recipient_pagination_edge_cases() {
+    let ctx = setup();
+    create_default_stream(&ctx, true);
+    create_default_stream(&ctx, true);
+
+    // offset exactly at the end (2 streams, offset 2) -> empty, not an error
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &2, &10)
+            .len(),
+        0
+    );
+    // offset one before the end -> just the last stream
+    let page = ctx
+        .stream
+        .get_streams_by_recipient_page(&ctx.recipient, &1, &10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap().id, 2);
+
+    // offset beyond the end -> empty
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &5, &10)
+            .len(),
+        0
+    );
+    // zero limit -> empty
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &0, &0)
+            .len(),
+        0
+    );
+    // offset + limit overflow must saturate, not panic
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&ctx.recipient, &u32::MAX, &u32::MAX)
+            .len(),
+        0
+    );
+    // unknown address -> empty
+    let stranger = Address::generate(&ctx.env);
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_recipient_page(&stranger, &0, &10)
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn test_recipient_page_size_is_capped() {
+    let ctx = setup();
+    let n = crate::MAX_PAGE_SIZE + 3;
+    token::StellarAssetClient::new(&ctx.env, &ctx.token_address)
+        .mint(&ctx.sender, &(AMOUNT * n as i128));
+    for _ in 0..n {
+        create_default_stream(&ctx, true);
+    }
+    let page = ctx
+        .stream
+        .get_streams_by_recipient_page(&ctx.recipient, &0, &u32::MAX);
+    assert_eq!(page.len(), crate::MAX_PAGE_SIZE);
+}
+
 // ---------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------
