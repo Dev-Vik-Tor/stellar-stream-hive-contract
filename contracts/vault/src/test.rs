@@ -718,3 +718,32 @@ fn test_releasing_full_balance_leaves_zero_locked() {
     assert_eq!(ctx.token.balance(&ctx.vault.address), 0);
     assert_eq!(ctx.token.balance(&recipient), 500);
 }
+
+#[test]
+fn test_release_for_unfunded_stream_returns_insufficient_balance() {
+    // Documents CURRENT behaviour. A stream id that was never funded has no
+    // pinned token and a zero balance. `authorize_and_pay` checks the token
+    // only when one is pinned, so the call passes the caller check and fails
+    // at the balance check with `InsufficientBalance`. Nothing moves and no
+    // event is emitted.
+    use soroban_sdk::testutils::Events as _;
+
+    let ctx = setup();
+    let recipient = Address::generate(&ctx.env);
+    let unknown_stream_id = 999;
+
+    let result = ctx.vault.try_release(
+        &ctx.stream_contract,
+        &recipient,
+        &ctx.token_address,
+        &100,
+        &unknown_stream_id,
+    );
+    assert_eq!(result, Err(Ok(VaultError::InsufficientBalance)));
+    assert!(ctx.env.events().all().events().is_empty());
+
+    assert_eq!(ctx.vault.balance_of_stream(&unknown_stream_id), 0);
+    assert_eq!(ctx.vault.total_locked(&ctx.token_address), 0);
+    assert_eq!(ctx.token.balance(&recipient), 0);
+    assert_eq!(ctx.token.balance(&ctx.vault.address), 0);
+}
