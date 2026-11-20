@@ -1447,3 +1447,62 @@ fn test_create_stream_rejects_negative_amount() {
     // No tokens must have moved.
     assert_eq!(ctx.token.balance(&ctx.sender), balance_before);
 }
+
+// ---------------------------------------------------------------------
+// Failed token transfers and event ordering
+// ---------------------------------------------------------------------
+
+#[test]
+fn test_create_stream_with_non_token_address_leaves_no_state() {
+    use soroban_sdk::testutils::Events as _;
+    let ctx = setup();
+    // A plain account address: it is not a contract, so the vault's
+    // `transfer` call cannot succeed.
+    let not_a_token = Address::generate(&ctx.env);
+    let sender_balance_before = ctx.token.balance(&ctx.sender);
+
+    let result = ctx.stream.try_create_stream(
+        &ctx.sender,
+        &ctx.recipient,
+        &not_a_token,
+        &AMOUNT,
+        &START,
+        &END,
+        &CLIFF,
+        &true,
+    );
+    assert!(
+        result.is_err(),
+        "create_stream must fail for a non-token address"
+    );
+
+    // No stream record, no sender/recipient index entries.
+    assert_eq!(
+        ctx.stream.try_get_stream(&1),
+        Err(Ok(crate::error::StreamError::StreamNotFound))
+    );
+    assert_eq!(ctx.stream.count_streams_by_sender(&ctx.sender), 0);
+    assert_eq!(ctx.stream.count_streams_by_recipient(&ctx.recipient), 0);
+    assert_eq!(
+        ctx.stream
+            .get_streams_by_sender_page(&ctx.sender, &0, &10)
+            .len(),
+        0
+    );
+
+    // No create event from the stream contract survived the failed call.
+    assert!(ctx
+        .env
+        .events()
+        .all()
+        .filter_by_contract(&ctx.stream.address)
+        .events()
+        .is_empty());
+
+    // No tokens moved.
+    assert_eq!(ctx.token.balance(&ctx.sender), sender_balance_before);
+
+    // The failed attempt did not consume an id: the next valid stream is 1.
+    assert_eq!(create_default_stream(&ctx, true), 1);
+}
+
