@@ -1,4 +1,4 @@
-﻿#![cfg(test)]
+#![cfg(test)]
 
 use crate::types::StreamStatus;
 use crate::{StreamContract, StreamContractClient};
@@ -783,7 +783,7 @@ fn test_page_size_is_capped() {
 
 #[test]
 fn test_create_event_carries_cliff_and_cancellable() {
-    use soroban_sdk::{symbol_short, testutils::Events as _, vec};
+    use soroban_sdk::{symbol_short, testutils::Events as _, vec, IntoVal as _};
     let ctx = setup();
 
     // A cliff distinct from both START and END, and cancellable = false, so a
@@ -821,7 +821,15 @@ fn test_create_event_carries_cliff_and_cancellable() {
             .into_val(&ctx.env),
     );
 
-    assert_eq!(ctx.env.events().all(), vec![&ctx.env, expected]);
+    // Only the stream contract's own event: `create_stream` also causes a
+    // token transfer event (from the vault deposit), which is not under test here.
+    assert_eq!(
+        ctx.env
+            .events()
+            .all()
+            .filter_by_contract(&ctx.stream.address),
+        vec![&ctx.env, expected]
+    );
 }
 
 #[test]
