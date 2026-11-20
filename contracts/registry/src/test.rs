@@ -287,3 +287,30 @@ fn test_get_active_streams_filters_correctly() {
     assert_eq!(active.get(0).unwrap(), 1);
     assert_eq!(active.get(1).unwrap(), 3);
 }
+
+#[test]
+fn test_update_stream_persists_status_and_absolute_withdrawn_in_record() {
+    let ctx = setup();
+    let sender = Address::generate(&ctx.env);
+    let recipient = Address::generate(&ctx.env);
+    let token = Address::generate(&ctx.env);
+    ctx.registry
+        .register_stream(&1, &sender, &recipient, &token, &1000);
+
+    ctx.registry.update_stream(&1, &300, &StreamStatus::Active);
+    ctx.registry
+        .update_stream(&1, &700, &StreamStatus::Completed);
+
+    // `withdrawn` is absolute, so the stored value is the latest report (700),
+    // not the sum of reports (1000), and the status is the latest one.
+    let record = ctx.registry.get_stream_record(&1);
+    assert_eq!(record.status, StreamStatus::Completed);
+    assert_eq!(record.withdrawn, 700);
+
+    // Immutable fields set by `register_stream` must be unchanged.
+    assert_eq!(record.stream_id, 1);
+    assert_eq!(record.sender, sender);
+    assert_eq!(record.recipient, recipient);
+    assert_eq!(record.token, token);
+    assert_eq!(record.amount, 1000);
+}
