@@ -31,7 +31,9 @@ the right channel below.
 - **Feature requests**: a change to the contracts or the streaming model. Use
   the feature request template.
 - **Documentation problems**: wrong or missing text in the docs or README.
-  Check the text against the contract source first.
+  Use the [documentation template](https://github.com/Stellar-Hive/stellar-stream-hive-contract/issues/new?template=documentation.md),
+  which asks for the source of truth. Check the text against the contract
+  source first.
 
 Please keep issues free of private keys, seed phrases and wallet secrets.
 
